@@ -89,15 +89,10 @@ while true; do
   sleep "$poll_interval"
 
   # Check for new messages since our snapshot
-  history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"historyTypes\": [\"messageAdded\"], \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null)
-  exit_code=$?
-
-  if [[ "$exit_code" -eq 2 ]]; then
-    die "Authentication failed. Check gws credentials." 1
-  elif [[ "$exit_code" -ne 0 ]]; then
+  history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null) || {
     echo "Warning: API error, retrying next cycle..." >&2
     continue
-  fi
+  }
 
   # Check if history array exists and has entries
   has_history=$(echo "$history_json" | jq -r 'if .history and (.history | length) > 0 then "yes" else "no" end')
@@ -106,9 +101,9 @@ while true; do
     continue
   fi
 
-  # Extract message ID from the first messageAdded event
+  # Extract message ID from the first history entry
   message_id=$(echo "$history_json" | jq -r '
-    [.history[].messagesAdded[]?.message.id] | first // empty
+    [.history[].messages[]?.id] | first // empty
   ')
 
   if [[ -z "$message_id" ]]; then
@@ -116,7 +111,7 @@ while true; do
   fi
 
   # Fetch message metadata
-  message_json=$(gws gmail users messages get --params "{\"userId\": \"me\", \"id\": \"${message_id}\", \"format\": \"metadata\", \"metadataHeaders\": [\"From\", \"To\", \"Subject\", \"Date\"]}" 2>/dev/null) || {
+  message_json=$(gws gmail users messages get --params "{\"userId\": \"me\", \"id\": \"${message_id}\", \"format\": \"full\"}" 2>/dev/null) || {
     echo "Warning: Could not fetch message details, retrying next cycle..." >&2
     continue
   }
