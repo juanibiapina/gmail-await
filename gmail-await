@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# gmail-await: Poll Gmail inbox until a new email arrives, then describe it.
+
+usage() {
+  cat <<'EOF'
+Usage: gmail-await [flags]
+
+Poll Gmail inbox until a new email arrives, then print a structured
+description and exit.
+
+Flags:
+  --timeout <seconds>    Maximum time to wait in seconds (exit 1 if exceeded)
+  --help                 Show this help message
+
+Exit codes:
+  0   New email detected, description printed to stdout
+  1   Timeout exceeded, or runtime error
+  2   Bad arguments or usage error
+EOF
+}
+
+die() {
+  echo "Error: $1" >&2
+  exit "${2:-1}"
+}
+
+# --- Phase 1: Parse arguments ---
+
+timeout=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --timeout)
+      [[ -n "${2:-}" ]] || die "--timeout requires a value" 2
+      timeout="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "Unknown flag: $1" 2
+      ;;
+    *)
+      die "Unexpected argument: $1" 2
+      ;;
+  esac
+done
+
+if [[ -n "$timeout" ]]; then
+  if ! [[ "$timeout" =~ ^[0-9]+$ ]] || [[ "$timeout" -lt 1 ]]; then
+    die "--timeout must be a positive number" 2
+  fi
+fi
+
+# --- Phase 2: Snapshot current state ---
+
+profile_json=$(gws gmail users getProfile --params '{"userId": "me"}' 2>/dev/null) || die "Could not fetch Gmail profile. Check gws authentication." 1
+history_id=$(echo "$profile_json" | jq -r '.historyId')
+
+[[ -n "$history_id" && "$history_id" != "null" ]] || die "Could not extract historyId from profile" 1
+
+echo "Watching Gmail inbox for new emails..." >&2
+
+# --- Phase 3: Poll loop ---
+
+poll_interval=60
+start_time=$(date +%s)
+
+while true; do
+  # Check timeout and compute sleep duration
+  if [[ -n "$timeout" ]]; then
+    elapsed=$(( $(date +%s) - start_time ))
+    remaining=$(( timeout - elapsed ))
+    if [[ "$remaining" -le 0 ]]; then
+      echo "Timeout after ${timeout}s with no new emails." >&2
+      exit 1
+    fi
+    if [[ "$remaining" -lt "$poll_interval" ]]; then
+      sleep "$remaining"
+      echo "Timeout after ${timeout}s with no new emails." >&2
+      exit 1
+    fi
+  fi
+
+  sleep "$poll_interval"
+
+  # Check for new messages since our snapshot
+  history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"historyTypes\": [\"messageAdded\"], \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null)
+  exit_code=$?
+
+  if [[ "$exit_code" -eq 2 ]]; then
+    die "Authentication failed. Check gws credentials." 1
+  elif [[ "$exit_code" -ne 0 ]]; then
+    echo "Warning: API error, retrying next cycle..." >&2
+    continue
+  fi
+
+  # Check if history array exists and has entries
+  has_history=$(echo "$history_json" | jq -r 'if .history and (.history | length) > 0 then "yes" else "no" end')
+
+  if [[ "$has_history" != "yes" ]]; then
+    continue
+  fi
+
+  # Extract message ID from the first messageAdded event
+  message_id=$(echo "$history_json" | jq -r '
+    [.history[].messagesAdded[]?.message.id] | first // empty
+  ')
+
+  if [[ -z "$message_id" ]]; then
+    continue
+  fi
+
+  # Fetch message metadata
+  message_json=$(gws gmail users messages get --params "{\"userId\": \"me\", \"id\": \"${message_id}\", \"format\": \"metadata\", \"metadataHeaders\": [\"From\", \"To\", \"Subject\", \"Date\"]}" 2>/dev/null) || {
+    echo "Warning: Could not fetch message details, retrying next cycle..." >&2
+    continue
+  }
+
+  # Extract fields
+  from=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "From") | .value // ""')
+  to=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "To") | .value // ""')
+  subject=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "Subject") | .value // ""')
+  date=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "Date") | .value // ""')
+  snippet=$(echo "$message_json" | jq -r '.snippet // ""')
+  labels=$(echo "$message_json" | jq -r '.labelIds // [] | join(", ")')
+  msg_id=$(echo "$message_json" | jq -r '.id // ""')
+  thread_id=$(echo "$message_json" | jq -r '.threadId // ""')
+
+  # Print structured output
+  cat <<EOF
+## New email
+
+From: ${from}
+To: ${to}
+Subject: ${subject}
+Date: ${date}
+Snippet: ${snippet}
+Labels: ${labels}
+Message ID: ${msg_id}
+Thread ID: ${thread_id}
+EOF
+
+  exit 0
+done
