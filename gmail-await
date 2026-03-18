@@ -101,9 +101,9 @@ while true; do
     continue
   fi
 
-  # Extract message ID from the first history entry
+  # Extract message ID from genuinely new messages only (not label changes)
   message_id=$(echo "$history_json" | jq -r '
-    [.history[].messages[]?.id] | first // empty
+    [.history[].messagesAdded[]?.message.id] | first // empty
   ')
 
   if [[ -z "$message_id" ]]; then
