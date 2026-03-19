@@ -1,0 +1,49 @@
+{
+  "history": [
+    {
+      "id": "8977409",
+      "messages": [
+        {
+          "id": "msg001",
+          "threadId": "thread001"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "msg001",
+            "labelIds": [
+              "UNREAD",
+              "IMPORTANT",
+              "CATEGORY_PERSONAL",
+              "INBOX"
+            ],
+            "threadId": "thread001"
+          }
+        }
+      ]
+    },
+    {
+      "id": "8977410",
+      "messages": [
+        {
+          "id": "msg002",
+          "threadId": "thread002"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "msg002",
+            "labelIds": [
+              "UNREAD",
+              "INBOX"
+            ],
+            "threadId": "thread002"
+          }
+        }
+      ]
+    }
+  ],
+  "historyId": "8978700"
+}

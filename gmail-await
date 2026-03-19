@@ -7,8 +7,8 @@ usage() {
   cat <<'EOF'
 Usage: gmail-await [flags]
 
-Poll Gmail inbox until a new email arrives, then print a structured
-description and exit.
+Poll Gmail inbox until new emails arrive, then print one JSON line per
+email and exit.
 
 Flags:
   --start-history-id <id>  Resume from this history ID instead of snapshotting
@@ -16,7 +16,7 @@ Flags:
   --help                   Show this help message
 
 Exit codes:
-  0   New email detected, description printed to stdout
+  0   New email(s) detected, descriptions printed to stdout
   1   Timeout exceeded, or runtime error
   2   Bad arguments or usage error
 
@@ -108,7 +108,7 @@ while true; do
   sleep "$poll_interval"
 
   # Check for new messages since our snapshot
-  if ! history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"historyTypes\": \"messageAdded\", \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null); then
+  if ! history_json=$(gws gmail users history list --page-all --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"historyTypes\": \"messageAdded\", \"labelId\": \"INBOX\"}" 2>/dev/null); then
     # Handle expired/invalid history ID by falling back to getProfile
     if [[ -n "$start_history_id" ]]; then
       echo "Warning: history ID may be expired, re-snapshotting from profile..." >&2
@@ -120,55 +120,37 @@ while true; do
     continue
   fi
 
-  # Check if history array exists and has entries
-  has_history=$(echo "$history_json" | jq -r 'if .history and (.history | length) > 0 then "yes" else "no" end')
+  # Extract all unique message IDs from new messages across all pages
+  mapfile -t message_ids < <(echo "$history_json" | jq -r '.history[]?.messagesAdded[]?.message.id // empty' | sort -u)
 
-  if [[ "$has_history" != "yes" ]]; then
+  if [[ ${#message_ids[@]} -eq 0 ]]; then
     continue
   fi
 
-  # Extract message ID from genuinely new messages only (not label changes)
-  message_id=$(echo "$history_json" | jq -r '
-    [.history[].messagesAdded[]?.message.id] | first // empty
-  ')
+  # Extract the history ID from the response (checkpoint for next invocation)
+  response_history_id=$(echo "$history_json" | jq -r '.historyId // empty' | tail -1)
 
-  if [[ -z "$message_id" ]]; then
-    continue
-  fi
+  # Fetch and output each message as a JSON line
+  for msg_id in "${message_ids[@]}"; do
+    message_json=$(gws gmail users messages get --params "{\"userId\": \"me\", \"id\": \"${msg_id}\", \"format\": \"full\"}" 2>/dev/null) || {
+      echo "Warning: Could not fetch message ${msg_id}, skipping..." >&2
+      continue
+    }
 
-  # Fetch message metadata
-  message_json=$(gws gmail users messages get --params "{\"userId\": \"me\", \"id\": \"${message_id}\", \"format\": \"full\"}" 2>/dev/null) || {
-    echo "Warning: Could not fetch message details, retrying next cycle..." >&2
-    continue
-  }
+    echo "$message_json" | jq -c '{
+      from: ([.payload.headers[] | select(.name == "From") | .value] | .[0] // ""),
+      to: ([.payload.headers[] | select(.name == "To") | .value] | .[0] // ""),
+      subject: ([.payload.headers[] | select(.name == "Subject") | .value] | .[0] // ""),
+      date: ([.payload.headers[] | select(.name == "Date") | .value] | .[0] // ""),
+      snippet: (.snippet // ""),
+      labels: (.labelIds // [] | join(", ")),
+      messageId: (.id // ""),
+      threadId: (.threadId // "")
+    }'
+  done
 
-  # Extract the current history ID from the response (checkpoint for next invocation)
-  response_history_id=$(echo "$history_json" | jq -r '.historyId // empty')
-
-  # Extract fields
-  from=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "From") | .value // ""')
-  to=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "To") | .value // ""')
-  subject=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "Subject") | .value // ""')
-  date=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "Date") | .value // ""')
-  snippet=$(echo "$message_json" | jq -r '.snippet // ""')
-  labels=$(echo "$message_json" | jq -r '.labelIds // [] | join(", ")')
-  msg_id=$(echo "$message_json" | jq -r '.id // ""')
-  thread_id=$(echo "$message_json" | jq -r '.threadId // ""')
-
-  # Print structured output
-  cat <<EOF
-## New email
-
-From: ${from}
-To: ${to}
-Subject: ${subject}
-Date: ${date}
-Snippet: ${snippet}
-Labels: ${labels}
-Message ID: ${msg_id}
-Thread ID: ${thread_id}
-History ID: ${response_history_id}
-EOF
+  # Print the historyId checkpoint as the final line
+  jq -nc --arg hid "$response_history_id" '{historyId: $hid}'
 
   exit 0
 done

@@ -138,15 +138,15 @@ setup() {
   assert [ "$(echo "$stderr" | grep -c 'API error, retrying')" -eq 1 ]
 }
 
-@test "message fetch failure: retries next cycle" {
+@test "message fetch failure: skips message and outputs historyId" {
   mock_gws_profile "$FIXTURES/profile.json"
   mock_gws_history 1 "$FIXTURES/history_with_message.json"
   mock_gws_message_fail 1
-  mock_gws_history 2 "$FIXTURES/history_with_message.json"
-  mock_gws_message "$FIXTURES/message.json"
 
   run --separate-stderr -0 "$GMAIL_AWAIT"
-  assert [ "$(echo "$stderr" | grep -c 'Could not fetch message details')" -eq 1 ]
+  assert [ "$(echo "$stderr" | grep -c 'Could not fetch message')" -eq 1 ]
+  # Only the historyId line, no email lines
+  assert_output '{"historyId":"8978700"}'
 }
 
 # =============================================================================
@@ -160,7 +160,7 @@ setup() {
   mock_gws_message "$FIXTURES/message.json"
 
   run -0 "$GMAIL_AWAIT"
-  assert_output --partial '## New email'
+  assert_output --partial '"subject":"Deploy approval for staging"'
 }
 
 @test "history entries but no messagesAdded: continues polling" {
@@ -170,20 +170,24 @@ setup() {
   mock_gws_message "$FIXTURES/message.json"
 
   run -0 "$GMAIL_AWAIT"
-  assert_output --partial '## New email'
+  assert_output --partial '"subject":"Deploy approval for staging"'
 }
 
 # =============================================================================
 # Happy path and output format
 # =============================================================================
 
-@test "email on first poll: exits 0 with structured output" {
+@test "email on first poll: exits 0 with JSON output" {
   mock_gws_profile "$FIXTURES/profile.json"
   mock_gws_history 1 "$FIXTURES/history_with_message.json"
   mock_gws_message "$FIXTURES/message.json"
 
   run --separate-stderr -0 "$GMAIL_AWAIT"
-  assert_output --partial '## New email'
+  # First line is the email JSON, second line is the historyId
+  email_line=$(echo "$output" | head -1)
+  assert [ "$(echo "$email_line" | jq -r '.subject')" = "Deploy approval for staging" ]
+  history_line=$(echo "$output" | tail -1)
+  assert [ "$(echo "$history_line" | jq -r '.historyId')" = "8978700" ]
 }
 
 @test "no email first poll, email second poll: exits 0" {
@@ -193,7 +197,7 @@ setup() {
   mock_gws_message "$FIXTURES/message.json"
 
   run -0 "$GMAIL_AWAIT"
-  assert_output --partial '## New email'
+  assert_output --partial '"subject":"Deploy approval for staging"'
 }
 
 @test "output contains all expected fields" {
@@ -202,14 +206,72 @@ setup() {
   mock_gws_message "$FIXTURES/message.json"
 
   run --separate-stderr -0 "$GMAIL_AWAIT"
-  assert_line '## New email'
-  assert_line 'From: Alice Smith <alice@example.com>'
-  assert_line 'To: user@example.com'
-  assert_line 'Subject: Deploy approval for staging'
-  assert_line 'Date: Wed, 18 Mar 2026 14:22:00 +0000'
-  assert_line 'Snippet: Hey, the staging deploy looks good to me. Go ahead and...'
-  assert_line 'Labels: INBOX, UNREAD, CATEGORY_PERSONAL'
-  assert_line 'Message ID: msg001'
-  assert_line 'Thread ID: thread001'
-  assert_line 'History ID: 8978700'
+
+  # Parse the email JSON line
+  email_line=$(echo "$output" | head -1)
+  assert [ "$(echo "$email_line" | jq -r '.from')" = "Alice Smith <alice@example.com>" ]
+  assert [ "$(echo "$email_line" | jq -r '.to')" = "user@example.com" ]
+  assert [ "$(echo "$email_line" | jq -r '.subject')" = "Deploy approval for staging" ]
+  assert [ "$(echo "$email_line" | jq -r '.date')" = "Wed, 18 Mar 2026 14:22:00 +0000" ]
+  assert [ "$(echo "$email_line" | jq -r '.snippet')" = "Hey, the staging deploy looks good to me. Go ahead and..." ]
+  assert [ "$(echo "$email_line" | jq -r '.labels')" = "INBOX, UNREAD, CATEGORY_PERSONAL" ]
+  assert [ "$(echo "$email_line" | jq -r '.messageId')" = "msg001" ]
+  assert [ "$(echo "$email_line" | jq -r '.threadId')" = "thread001" ]
+
+  # Parse the historyId line
+  history_line=$(echo "$output" | tail -1)
+  assert [ "$(echo "$history_line" | jq -r '.historyId')" = "8978700" ]
+}
+
+# =============================================================================
+# Multiple emails
+# =============================================================================
+
+@test "multiple emails: outputs one JSON line per email plus historyId line" {
+  mock_gws_profile "$FIXTURES/profile.json"
+  mock_gws_history 1 "$FIXTURES/history_with_two_messages.json"
+  mock_gws_message_nth 1 "$FIXTURES/message.json"
+  mock_gws_message_nth 2 "$FIXTURES/message_2.json"
+
+  run --separate-stderr -0 "$GMAIL_AWAIT"
+
+  # Should have 3 lines: 2 emails + 1 historyId
+  line_count=$(echo "$output" | wc -l)
+  assert [ "$line_count" -eq 3 ]
+
+  # Check first email
+  line1=$(echo "$output" | sed -n '1p')
+  assert [ "$(echo "$line1" | jq -r '.subject')" = "Deploy approval for staging" ]
+  assert [ "$(echo "$line1" | jq -r '.from')" = "Alice Smith <alice@example.com>" ]
+
+  # Check second email
+  line2=$(echo "$output" | sed -n '2p')
+  assert [ "$(echo "$line2" | jq -r '.subject')" = "Invoice for March" ]
+  assert [ "$(echo "$line2" | jq -r '.from')" = "Bob Jones <bob@example.com>" ]
+
+  # Check historyId line
+  line3=$(echo "$output" | sed -n '3p')
+  assert [ "$(echo "$line3" | jq -r '.historyId')" = "8978700" ]
+}
+
+@test "one message fetch fails, others still output" {
+  mock_gws_profile "$FIXTURES/profile.json"
+  mock_gws_history 1 "$FIXTURES/history_with_two_messages.json"
+  mock_gws_message_fail 1
+  mock_gws_message_nth 2 "$FIXTURES/message_2.json"
+
+  run --separate-stderr -0 "$GMAIL_AWAIT"
+  assert [ "$(echo "$stderr" | grep -c 'Could not fetch message')" -eq 1 ]
+
+  # Should have 2 lines: 1 email + 1 historyId
+  line_count=$(echo "$output" | wc -l)
+  assert [ "$line_count" -eq 2 ]
+
+  # Check the successful email
+  line1=$(echo "$output" | sed -n '1p')
+  assert [ "$(echo "$line1" | jq -r '.subject')" = "Invoice for March" ]
+
+  # Check historyId line
+  line2=$(echo "$output" | sed -n '2p')
+  assert [ "$(echo "$line2" | jq -r '.historyId')" = "8978700" ]
 }

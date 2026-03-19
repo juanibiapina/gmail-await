@@ -1,0 +1,39 @@
+{
+  "id": "msg002",
+  "threadId": "thread002",
+  "historyId": "8977835",
+  "internalDate": "1773906725000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "Please find attached the invoice for March...",
+  "sizeEstimate": 4200,
+  "payload": {
+    "partId": "",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "Date",
+        "value": "Wed, 18 Mar 2026 15:22:00 +0000"
+      },
+      {
+        "name": "Subject",
+        "value": "Invoice for March"
+      },
+      {
+        "name": "From",
+        "value": "Bob Jones <bob@example.com>"
+      },
+      {
+        "name": "To",
+        "value": "user@example.com"
+      }
+    ],
+    "body": {
+      "data": "SW52b2ljZSBhdHRhY2hlZA==",
+      "size": 16
+    }
+  }
+}

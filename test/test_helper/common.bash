@@ -104,6 +104,13 @@ mock_gws_message() {
   cp "$1" "$MOCK_DIR/message_response.json"
 }
 
+# Configure message response for the nth call
+mock_gws_message_nth() {
+  local call_number="$1"
+  local fixture="$2"
+  cp "$fixture" "$MOCK_DIR/message_response_${call_number}.json"
+}
+
 # Make the nth message call fail
 mock_gws_message_fail() {
   local call_number="$1"
