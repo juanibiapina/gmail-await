@@ -11,8 +11,9 @@ Poll Gmail inbox until a new email arrives, then print a structured
 description and exit.
 
 Flags:
-  --timeout <seconds>    Maximum time to wait in seconds (exit 1 if exceeded)
-  --help                 Show this help message
+  --start-history-id <id>  Resume from this history ID instead of snapshotting
+  --timeout <seconds>      Maximum time to wait in seconds (exit 1 if exceeded)
+  --help                   Show this help message
 
 Exit codes:
   0   New email detected, description printed to stdout
@@ -29,9 +30,15 @@ die() {
 # --- Phase 1: Parse arguments ---
 
 timeout=""
+start_history_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --start-history-id)
+      [[ -n "${2:-}" ]] || die "--start-history-id requires a value" 2
+      start_history_id="$2"
+      shift 2
+      ;;
     --timeout)
       [[ -n "${2:-}" ]] || die "--timeout requires a value" 2
       timeout="$2"
@@ -58,10 +65,19 @@ fi
 
 # --- Phase 2: Snapshot current state ---
 
-profile_json=$(gws gmail users getProfile --params '{"userId": "me"}' 2>/dev/null) || die "Could not fetch Gmail profile. Check gws authentication." 1
-history_id=$(echo "$profile_json" | jq -r '.historyId')
+snapshot_from_profile() {
+  local profile_json
+  profile_json=$(gws gmail users getProfile --params '{"userId": "me"}' 2>/dev/null) || die "Could not fetch Gmail profile. Check gws authentication." 1
+  history_id=$(echo "$profile_json" | jq -r '.historyId')
+  [[ -n "$history_id" && "$history_id" != "null" ]] || die "Could not extract historyId from profile" 1
+}
 
-[[ -n "$history_id" && "$history_id" != "null" ]] || die "Could not extract historyId from profile" 1
+if [[ -n "$start_history_id" ]]; then
+  history_id="$start_history_id"
+  echo "Resuming from history ID ${history_id}..." >&2
+else
+  snapshot_from_profile
+fi
 
 echo "Watching Gmail inbox for new emails..." >&2
 
@@ -89,10 +105,17 @@ while true; do
   sleep "$poll_interval"
 
   # Check for new messages since our snapshot
-  history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null) || {
-    echo "Warning: API error, retrying next cycle..." >&2
+  if ! history_json=$(gws gmail users history list --params "{\"userId\": \"me\", \"startHistoryId\": \"${history_id}\", \"historyTypes\": \"messageAdded\", \"labelId\": \"INBOX\", \"maxResults\": 1}" 2>/dev/null); then
+    # Handle expired/invalid history ID by falling back to getProfile
+    if [[ -n "$start_history_id" ]]; then
+      echo "Warning: history ID may be expired, re-snapshotting from profile..." >&2
+      snapshot_from_profile
+      start_history_id=""
+    else
+      echo "Warning: API error, retrying next cycle..." >&2
+    fi
     continue
-  }
+  fi
 
   # Check if history array exists and has entries
   has_history=$(echo "$history_json" | jq -r 'if .history and (.history | length) > 0 then "yes" else "no" end')
@@ -116,6 +139,9 @@ while true; do
     continue
   }
 
+  # Extract the current history ID from the response (checkpoint for next invocation)
+  response_history_id=$(echo "$history_json" | jq -r '.historyId // empty')
+
   # Extract fields
   from=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "From") | .value // ""')
   to=$(echo "$message_json" | jq -r '.payload.headers[] | select(.name == "To") | .value // ""')
@@ -138,6 +164,7 @@ Snippet: ${snippet}
 Labels: ${labels}
 Message ID: ${msg_id}
 Thread ID: ${thread_id}
+History ID: ${response_history_id}
 EOF
 
   exit 0

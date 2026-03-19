@@ -24,6 +24,7 @@ gmail-await [flags]
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--start-history-id <id>` | none | Resume from this history ID instead of snapshotting |
 | `--timeout <seconds>` | none | Max wait time (exit 1 if exceeded) |
 | `--help` | - | Show help |
 
@@ -49,6 +50,12 @@ Wait with a 5-minute timeout:
 gmail-await --timeout 300
 ```
 
+Resume from a known history ID (no emails missed between invocations):
+
+```
+gmail-await --start-history-id 8977613
+```
+
 ## Example output
 
 ```
@@ -62,7 +69,10 @@ Snippet: Hey, the staging deploy looks good to me. Go ahead and...
 Labels: INBOX, UNREAD, CATEGORY_PERSONAL
 Message ID: 18f1a2b3c4d
 Thread ID: 18f1a2b3c4e
+History ID: 8977696
 ```
+
+The `History ID` is a checkpoint: pass it back via `--start-history-id` on the next invocation to avoid missing emails between runs.
 
 Status messages go to stderr, event output goes to stdout. This makes it easy to pipe:
 
@@ -80,20 +90,27 @@ The output is plain text structured for machine consumption. A typical agent wor
 4. Loop back to step 1
 
 ```bash
+history_id=""
 while true; do
-  gmail-await | pi "Handle this email."
+  args=()
+  [[ -n "$history_id" ]] && args+=(--start-history-id "$history_id")
+  output=$(gmail-await "${args[@]}") || continue
+  history_id=$(echo "$output" | grep "^History ID:" | sed 's/^History ID: //')
+  echo "$output" | pi "Handle this email."
 done
 ```
 
-Each invocation snapshots the current state on startup, so the loop naturally picks up emails one at a time.
+The loop threads the `History ID` from each invocation into the next, so no emails are lost between runs.
 
 ## How it works
 
-1. **Snapshot**: Calls `gws gmail users getProfile` to get the current `historyId`, which marks the baseline.
-2. **Poll**: Every 60 seconds, calls `gws gmail users history list` with `historyTypes: ["messageAdded"]` and `labelId: "INBOX"` to check for new messages since the snapshot.
-3. **Describe**: On the first new message, fetches its metadata (From, To, Subject, Date, snippet, labels) via `gws gmail users messages get` and prints the structured description.
+1. **Snapshot**: Uses the `--start-history-id` if provided. Otherwise calls `gws gmail users getProfile` to get the current `historyId` as the baseline.
+2. **Poll**: Every 60 seconds, calls `gws gmail users history list` with `historyTypes: "messageAdded"` and `labelId: "INBOX"` to check for new messages since the snapshot.
+3. **Describe**: On the first new message, fetches its metadata (From, To, Subject, Date, snippet, labels) via `gws gmail users messages get` and prints the structured description along with the response's `historyId` as a checkpoint.
 
-One event per exit. If multiple emails arrived between polls, only the first is reported. The next invocation picks up the rest naturally.
+One event per exit. If multiple emails arrived between polls, only the first is reported. Pass the output's `History ID` back via `--start-history-id` to pick up the rest on the next invocation.
+
+If a provided `--start-history-id` is expired (API returns an error), the script falls back to `getProfile` automatically.
 
 ### API cost
 
