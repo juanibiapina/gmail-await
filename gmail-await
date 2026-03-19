@@ -19,6 +19,9 @@ Exit codes:
   0   New email detected, description printed to stdout
   1   Timeout exceeded, or runtime error
   2   Bad arguments or usage error
+
+Environment variables:
+  GMAIL_AWAIT_POLL_INTERVAL  Poll interval in seconds (default: 60)
 EOF
 }
 
@@ -83,7 +86,7 @@ echo "Watching Gmail inbox for new emails..." >&2
 
 # --- Phase 3: Poll loop ---
 
-poll_interval=60
+poll_interval="${GMAIL_AWAIT_POLL_INTERVAL:-60}"
 start_time=$(date +%s)
 
 while true; do

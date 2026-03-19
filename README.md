@@ -112,9 +112,33 @@ One event per exit. If multiple emails arrived between polls, only the first is 
 
 If a provided `--start-history-id` is expired (API returns an error), the script falls back to `getProfile` automatically.
 
+### Poll interval
+
+The default poll interval is 60 seconds. Override it with the `GMAIL_AWAIT_POLL_INTERVAL` environment variable (in seconds):
+
+```
+GMAIL_AWAIT_POLL_INTERVAL=30 gmail-await
+```
+
 ### API cost
 
-Each poll cycle makes 1 API call (history list). When a new email is detected, 1 additional call fetches the message metadata. At 60-second intervals, this is 1 call/minute steady state. Well within Gmail API quotas.
+Each poll cycle makes 1 API call (history list). When a new email is detected, 1 additional call fetches the message metadata. At the default 60-second interval, this is 1 call/minute steady state. Well within Gmail API quotas.
+
+## Testing
+
+Tests use [bats-core](https://github.com/bats-core/bats-core) with [bats-support](https://github.com/bats-core/bats-support) and [bats-assert](https://github.com/bats-core/bats-assert), vendored as git submodules. After cloning, initialize them:
+
+```
+git submodule update --init --recursive
+```
+
+Run all tests:
+
+```
+./test/bats/bin/bats test/
+```
+
+Tests mock `gws` via PATH manipulation, so no Google account or network access is required. Test fixtures are derived from real Gmail API responses. The only runtime dependency for tests is `jq`.
 
 ## License
 

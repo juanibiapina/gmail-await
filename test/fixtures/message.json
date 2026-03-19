@@ -1,0 +1,56 @@
+{
+  "id": "msg001",
+  "threadId": "thread001",
+  "historyId": "8977830",
+  "internalDate": "1773903125000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD",
+    "CATEGORY_PERSONAL"
+  ],
+  "snippet": "Hey, the staging deploy looks good to me. Go ahead and...",
+  "sizeEstimate": 6914,
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+      {
+        "name": "Date",
+        "value": "Wed, 18 Mar 2026 14:22:00 +0000"
+      },
+      {
+        "name": "Subject",
+        "value": "Deploy approval for staging"
+      },
+      {
+        "name": "From",
+        "value": "Alice Smith <alice@example.com>"
+      },
+      {
+        "name": "To",
+        "value": "user@example.com"
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=\"utf-8\""
+          }
+        ],
+        "body": {
+          "data": "SGVsbG8gd29ybGQ=",
+          "size": 11
+        }
+      }
+    ]
+  }
+}

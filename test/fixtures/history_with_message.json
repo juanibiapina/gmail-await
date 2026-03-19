@@ -1,0 +1,29 @@
+{
+  "history": [
+    {
+      "id": "8977409",
+      "messages": [
+        {
+          "id": "msg001",
+          "threadId": "thread001"
+        }
+      ],
+      "messagesAdded": [
+        {
+          "message": {
+            "id": "msg001",
+            "labelIds": [
+              "UNREAD",
+              "IMPORTANT",
+              "CATEGORY_PERSONAL",
+              "INBOX"
+            ],
+            "threadId": "thread001"
+          }
+        }
+      ]
+    }
+  ],
+  "historyId": "8978700",
+  "nextPageToken": "04792933066678131522"
+}
