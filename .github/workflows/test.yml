@@ -8,6 +8,6 @@ jobs:
         with:
           submodules: recursive
       - name: Install jq
-        run: sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
       - name: Run tests
         run: ./test/bats/bin/bats test/
