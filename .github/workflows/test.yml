@@ -1,0 +1,15 @@
+name: test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Run tests
+        run: ./test/bats/bin/bats test/
